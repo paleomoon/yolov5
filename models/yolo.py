@@ -248,27 +248,27 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
 
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
-        m = eval(m) if isinstance(m, str) else m  # eval strings
+        m = eval(m) if isinstance(m, str) else m  # eval strings, how to eval("Conv")?
         for j, a in enumerate(args):
             try:
                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
             except NameError:
                 pass
 
-        n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
+        n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain,round(x[, n])四舍五入
         if m in [Conv, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, MixConv2d, Focus, CrossConv,
                  BottleneckCSP, C3, C3TR, C3SPP, C3Ghost]:
             c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output
-                c2 = make_divisible(c2 * gw, 8)
+                c2 = make_divisible(c2 * gw, 8) # 保证输出通道是8的倍数
 
             args = [c1, c2, *args[1:]]
             if m in [BottleneckCSP, C3, C3TR, C3Ghost]:
                 args.insert(2, n)  # number of repeats
                 n = 1
-        elif m is nn.BatchNorm2d:
+        elif m is nn.BatchNorm2d: # 通道不变
             args = [ch[f]]
-        elif m is Concat:
+        elif m is Concat: # 所有层的和
             c2 = sum(ch[x] for x in f)
         elif m is Detect:
             args.append([ch[x] for x in f])

@@ -38,9 +38,9 @@ class Conv(nn.Module):
     # Standard convolution
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
         super().__init__()
-        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False)
+        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False) # autopad计算same-padding所需要的padding
         self.bn = nn.BatchNorm2d(c2)
-        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
+        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity()) # SiLU=x*σ(x)
 
     def forward(self, x):
         return self.act(self.bn(self.conv(x)))
@@ -96,9 +96,9 @@ class Bottleneck(nn.Module):
     def __init__(self, c1, c2, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, shortcut, groups, expansion
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = Conv(c_, c2, 3, 1, g=g)
-        self.add = shortcut and c1 == c2
+        self.cv1 = Conv(c1, c_, 1, 1) # 1x1卷积缩小channel为原来的1/2
+        self.cv2 = Conv(c_, c2, 3, 1, g=g) # 3x3卷积提取特征
+        self.add = shortcut and c1 == c2 # 如果输入通道c1和3x3卷积输出通道c2相等，则进行残差输出
 
     def forward(self, x):
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
@@ -164,10 +164,10 @@ class C3Ghost(C3):
 
 class SPP(nn.Module):
     # Spatial Pyramid Pooling (SPP) layer https://arxiv.org/abs/1406.4729
-    def __init__(self, c1, c2, k=(5, 9, 13)):
+    def __init__(self, c1, c2, k=(5, 9, 13)): # kernel size为5，9，13的maxpooling
         super().__init__()
         c_ = c1 // 2  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv1 = Conv(c1, c_, 1, 1) # 输入通道减半
         self.cv2 = Conv(c_ * (len(k) + 1), c2, 1, 1)
         self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in k])
 

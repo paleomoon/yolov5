@@ -682,8 +682,8 @@ def load_mosaic(self, index):
     # YOLOv5 4-mosaic loader. Loads 1 image + 3 random images into a 4-image mosaic
     labels4, segments4 = [], []
     s = self.img_size
-    yc, xc = (int(random.uniform(-x, 2 * s + x)) for x in self.mosaic_border)  # mosaic center x, y
-    indices = [index] + random.choices(self.indices, k=3)  # 3 additional image indices
+    yc, xc = (int(random.uniform(-x, 2 * s + x)) for x in self.mosaic_border)  # mosaic center x, y 图片中心点的上下左右1/4区域随机选取一个点，这个点作为4张图片的接合点
+    indices = [index] + random.choices(self.indices, k=3)  # 3 additional image indices 随机选取3张图片，加上当前图片，就是4张图片
     random.shuffle(indices)
     for i, index in enumerate(indices):
         # Load image

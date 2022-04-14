@@ -89,7 +89,7 @@ def replicate(im, labels):
 
 
 def letterbox(im, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True, stride=32):
-    # Resize and pad image while meeting stride-multiple constraints
+    # Resize and pad image while meeting stride-multiple constraints，auto表示是否自动补齐到32的整数倍，scaleFill表示不采用自适应缩放，直接resize到目标shape，无需补边
     shape = im.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):
         new_shape = (new_shape, new_shape)
