@@ -21,11 +21,11 @@ import cv2
 import torch
 import torch.backends.cudnn as cudnn
 
-FILE = Path(__file__).resolve()
+FILE = Path(__file__).resolve() # __file__ 当前文件，Path().resolve()返回处理后的绝对路径
 ROOT = FILE.parents[0]  # YOLOv5 root directory
-if str(ROOT) not in sys.path:
+if str(ROOT) not in sys.path: # sys.path 模块搜索路径
     sys.path.append(str(ROOT))  # add ROOT to PATH
-ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
+ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative，Path.cwd()当前路径，os.path.relpath(ROOT, Path.cwd())返回二者间相对路径
 
 from models.common import DetectMultiBackend
 from utils.datasets import IMG_FORMATS, VID_FORMATS, LoadImages, LoadStreams
@@ -202,9 +202,12 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
 
 def parse_opt():
     parser = argparse.ArgumentParser()
+    # nargs表示当前选项可以消耗多个参数
+    # action 使用选项--foo时使用action，store_true表示True
+    # default 不使用选项--foo时使用default
     parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model path(s)')
     parser.add_argument('--source', type=str, default=ROOT / 'data/images', help='file/dir/URL/glob, 0 for webcam')
-    parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
+    parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w') # --imgsz 640 640
     parser.add_argument('--conf-thres', type=float, default=0.25, help='confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.45, help='NMS IoU threshold')
     parser.add_argument('--max-det', type=int, default=1000, help='maximum detections per image')
@@ -218,7 +221,7 @@ def parse_opt():
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--visualize', action='store_true', help='visualize features')
-    parser.add_argument('--update', action='store_true', help='update all models')
+    parser.add_argument('--update', action='store_true', help='update all models') #TODO
     parser.add_argument('--project', default=ROOT / 'runs/detect', help='save results to project/name')
     parser.add_argument('--name', default='exp', help='save results to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
@@ -228,7 +231,7 @@ def parse_opt():
     parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
     opt = parser.parse_args()
-    opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
+    opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand, list [a]*=2 -> [a,a]
     print_args(FILE.stem, opt)
     return opt
 
