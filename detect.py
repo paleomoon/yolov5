@@ -205,7 +205,7 @@ def parse_opt():
     # nargs表示当前选项可以消耗多个参数
     # action 使用选项--foo时使用action，store_true表示True
     # default 不使用选项--foo时使用default
-    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model path(s)')
+    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model path(s)') #Path与字符串拼接不需要+号
     parser.add_argument('--source', type=str, default=ROOT / 'data/images', help='file/dir/URL/glob, 0 for webcam')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w') # --imgsz 640 640
     parser.add_argument('--conf-thres', type=float, default=0.25, help='confidence threshold')

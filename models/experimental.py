@@ -96,14 +96,14 @@ def attempt_load(weights, map_location=None, inplace=True, fuse=True):
         ckpt = torch.load(attempt_download(w), map_location=map_location)  # load
         # fuse conv and bn layer: https://github.com/ultralytics/yolov5/issues/840
         if fuse:
-            model.append(ckpt['ema' if ckpt.get('ema') else 'model'].float().fuse().eval())  # FP32 model
+            model.append(ckpt['ema' if ckpt.get('ema') else 'model'].float().fuse().eval())  # FP32 model TODO
         else:
             model.append(ckpt['ema' if ckpt.get('ema') else 'model'].float().eval())  # without layer fuse
 
     # Compatibility updates
     for m in model.modules():
         if type(m) in [nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6, nn.SiLU, Detect, Model]:
-            m.inplace = inplace  # pytorch 1.7.0 compatibility
+            m.inplace = inplace  # pytorch 1.7.0 compatibility TODO
             if type(m) is Detect:
                 if not isinstance(m.anchor_grid, list):  # new Detect Layer compatibility
                     delattr(m, 'anchor_grid')

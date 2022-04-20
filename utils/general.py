@@ -350,7 +350,7 @@ def check_file(file, suffix=''):
             print(f'Found {url} locally at {file}')  # file already exists
         else:
             print(f'Downloading {url} to {file}...')
-            torch.hub.download_url_to_file(url, file)
+            torch.hub.download_url_to_file(url, file) #下载文件
             assert Path(file).exists() and Path(file).stat().st_size > 0, f'File download failed: {url}'  # check
         return file
     else:  # search
