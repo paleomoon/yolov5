@@ -38,15 +38,16 @@ class Conv(nn.Module):
     # Standard convolution
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
         super().__init__()
-        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False) # autopad计算same-padding所需要的padding
+        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False) # autopad计算same-padding所需要的padding，groups表示分组卷积
+        #bias默认人True，通常在BN层前设为False，因为BN的beta参数（偏置）有同样的效果，而且BN的减均值可能会消除bias. https://discuss.pytorch.org/t/any-purpose-to-set-bias-false-in-densenet-torchvision/22067
         self.bn = nn.BatchNorm2d(c2)
-        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity()) # SiLU=x*σ(x)
+        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity()) # SiLU=x*σ(x) TODO
 
     def forward(self, x):
         return self.act(self.bn(self.conv(x)))
 
     def forward_fuse(self, x):
-        return self.act(self.conv(x))
+        return self.act(self.conv(x)) # fuse是怎么做的？BN层的计算去哪里了？
 
 
 class DWConv(Conv):
@@ -374,7 +375,7 @@ class DetectMultiBackend(nn.Module):
                 interpreter.allocate_tensors()  # allocate
                 input_details = interpreter.get_input_details()  # inputs
                 output_details = interpreter.get_output_details()  # outputs
-        self.__dict__.update(locals())  # assign all variables to self
+        self.__dict__.update(locals())  # assign all variables to self，将本函数内的局部变量自动分配给self属性，不用繁琐地赋值了
 
     def forward(self, im, augment=False, visualize=False, val=False):
         # YOLOv5 MultiBackend inference

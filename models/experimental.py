@@ -81,7 +81,7 @@ class Ensemble(nn.ModuleList):
         y = []
         for module in self:
             y.append(module(x, augment, profile, visualize)[0])
-        # y = torch.stack(y).max(0)[0]  # max ensemble
+        # y = torch.stack(y).max(0)[0]  # max ensemble, torch.stack默认dim=0，max(0)在dim=0上取最大值
         # y = torch.stack(y).mean(0)  # mean ensemble
         y = torch.cat(y, 1)  # nms ensemble
         return y, None  # inference, train output
@@ -102,6 +102,7 @@ def attempt_load(weights, map_location=None, inplace=True, fuse=True):
 
     # Compatibility updates
     for m in model.modules():
+        print(type(m))
         if type(m) in [nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6, nn.SiLU, Detect, Model]:
             m.inplace = inplace  # pytorch 1.7.0 compatibility TODO
             if type(m) is Detect:
@@ -112,10 +113,10 @@ def attempt_load(weights, map_location=None, inplace=True, fuse=True):
             m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
 
     if len(model) == 1:
-        return model[-1]  # return model
+        return model[-1]  # return model，ensemble model 长度为1则返回Model
     else:
         print(f'Ensemble created with {weights}\n')
         for k in ['names']:
-            setattr(model, k, getattr(model[-1], k))
+            setattr(model, k, getattr(model[-1], k)) #设置ensemble model的class names为最后一个model的names
         model.stride = model[torch.argmax(torch.tensor([m.stride.max() for m in model])).int()].stride  # max stride
         return model  # return ensemble

@@ -158,9 +158,9 @@ class _RepeatSampler:
 class LoadImages:
     # YOLOv5 image/video dataloader, i.e. `python detect.py --source image.jpg/vid.mp4`
     def __init__(self, path, img_size=640, stride=32, auto=True):
-        p = str(Path(path).resolve())  # os-agnostic absolute path
+        p = str(Path(path).resolve())  # os-agnostic absolute path，处理后的绝对路径
         if '*' in p:
-            files = sorted(glob.glob(p, recursive=True))  # glob
+            files = sorted(glob.glob(p, recursive=True))  # glob，glob.glob返回通配符匹配的结果
         elif os.path.isdir(p):
             files = sorted(glob.glob(os.path.join(p, '*.*')))  # dir
         elif os.path.isfile(p):
