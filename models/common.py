@@ -8,7 +8,7 @@ import math
 import platform
 import warnings
 from collections import OrderedDict, namedtuple
-from copy import copy
+from copy import copy # 数据拷贝模块 分浅拷贝和深拷贝
 from pathlib import Path
 
 import cv2
@@ -18,7 +18,7 @@ import requests
 import torch
 import torch.nn as nn
 from PIL import Image
-from torch.cuda import amp
+from torch.cuda import amp # 混合精度训练模块
 
 from utils.datasets import exif_transpose, letterbox
 from utils.general import (LOGGER, check_requirements, check_suffix, colorstr, increment_path, make_divisible,
@@ -28,7 +28,7 @@ from utils.torch_utils import copy_attr, time_sync
 
 
 def autopad(k, p=None):  # kernel, padding
-    # Pad to 'same'
+    # Pad to 'same',在特定输入和步长情况下，same卷积padding=k//2
     if p is None:
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
     return p
@@ -38,8 +38,8 @@ class Conv(nn.Module):
     # Standard convolution
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
         super().__init__()
-        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False) # autopad计算same-padding所需要的padding，groups表示分组卷积
-        #bias默认人True，通常在BN层前设为False，因为BN的beta参数（偏置）有同样的效果，而且BN的减均值可能会消除bias. https://discuss.pytorch.org/t/any-purpose-to-set-bias-false-in-densenet-torchvision/22067
+        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False) # groups表示分组卷积，1表示普通卷积
+        #nn.Conv2d bias默认为True，通常在BN层前设为False，因为BN的beta参数（偏置）有同样的效果，而且BN的减均值可能会消除bias. https://discuss.pytorch.org/t/any-purpose-to-set-bias-false-in-densenet-torchvision/22067
         self.bn = nn.BatchNorm2d(c2)
         self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity()) # SiLU=x*σ(x) TODO
 
@@ -47,7 +47,7 @@ class Conv(nn.Module):
         return self.act(self.bn(self.conv(x)))
 
     def forward_fuse(self, x):
-        return self.act(self.conv(x)) # fuse是怎么做的？BN层的计算去哪里了？
+        return self.act(self.conv(x)) # 这里的conv是conv和bn fuse 的结果，一般用于测试/验证阶段
 
 
 class DWConv(Conv):
@@ -94,12 +94,20 @@ class TransformerBlock(nn.Module):
 
 class Bottleneck(nn.Module):
     # Standard bottleneck
+    """在BottleneckCSP和yolo.py的parse_model中调用
+    Standard bottleneck  Conv+Conv+shortcut
+    :params c1: 第一个卷积的输入channel
+    :params c2: 第二个卷积的输出channel
+    :params shortcut: bool 是否有shortcut连接 默认是True
+    :params g: 卷积分组的个数  =1就是普通卷积  >1就是深度可分离卷积
+    :params e: expansion ratio  e*c2就是第一个卷积的输出channel=第二个卷积的输入channel
+    """
     def __init__(self, c1, c2, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, shortcut, groups, expansion
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1) # 1x1卷积缩小channel为原来的1/2
+        self.cv1 = Conv(c1, c_, 1, 1) # 1x1卷积缩小channel为原来的e倍
         self.cv2 = Conv(c_, c2, 3, 1, g=g) # 3x3卷积提取特征
-        self.add = shortcut and c1 == c2 # 如果输入通道c1和3x3卷积输出通道c2相等，则进行残差输出
+        self.add = shortcut and c1 == c2 # 如果输入通道c1和3x3卷积输出通道c2相等，则进行残差连接
 
     def forward(self, x):
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
@@ -107,7 +115,15 @@ class Bottleneck(nn.Module):
 
 class BottleneckCSP(nn.Module):
     # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
-    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
+    """由Bottleneck模块和CSP结构组成, 在C3模块和yolo.py的parse_model模块调用
+        :params c1: 整个BottleneckCSP的输入channel
+        :params c2: 整个BottleneckCSP的输出channel
+        :params n: 有n个Bottleneck
+        :params shortcut: Bottleneck中是否有shortcut,默认True
+        :params g: Bottleneck中的3x3卷积类型  =1普通卷积  >1深度可分离卷积
+        :params e: expansion ratio c2*e=中间其他所有层的卷积核个数/中间所有层的输入输出channel数
+        """
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number of Bottleneck, shortcut, groups, expansion
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
@@ -126,7 +142,8 @@ class BottleneckCSP(nn.Module):
 
 class C3(nn.Module):
     # CSP Bottleneck with 3 convolutions
-    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number, shortcut, groups, expansion
+    # C3是一种简化版的BottleneckCSP，只有3个卷积，更快，参数更少，与BottleneckCSP性能相似，所以一般用来替换BottleneckCSP
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):  # ch_in, ch_out, number of Bottleneck, shortcut, groups, expansion
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = Conv(c1, c_, 1, 1)
@@ -168,8 +185,8 @@ class SPP(nn.Module):
     def __init__(self, c1, c2, k=(5, 9, 13)): # kernel size为5，9，13的maxpooling
         super().__init__()
         c_ = c1 // 2  # hidden channels
-        self.cv1 = Conv(c1, c_, 1, 1) # 输入通道减半
-        self.cv2 = Conv(c_ * (len(k) + 1), c2, 1, 1)
+        self.cv1 = Conv(c1, c_, 1, 1) # 第一层卷积，输入通道减半
+        self.cv2 = Conv(c_ * (len(k) + 1), c2, 1, 1)# 最后一层卷积，前面经过k个pooling（通道数不变）和一个shutcut，所以乘以len(k)+1
         self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in k])
 
     def forward(self, x):
@@ -199,13 +216,14 @@ class SPPF(nn.Module):
 
 class Focus(nn.Module):
     # Focus wh information into c-space
+    # 先做4个slice 再concat 最后再做Conv
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
         super().__init__()
         self.conv = Conv(c1 * 4, c2, k, s, p, g, act)
         # self.contract = Contract(gain=2)
 
     def forward(self, x):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
-        return self.conv(torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1))
+        return self.conv(torch.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1))# x[..., ::2, ::2]中2表示步长，在dim=1cat，(1,3,320,320)*4 -> (1,12,320,320)
         # return self.conv(self.contract(x))
 
 
@@ -238,17 +256,17 @@ class GhostBottleneck(nn.Module):
 
 
 class Contract(nn.Module):
-    # Contract width-height into channels, i.e. x(1,64,80,80) to x(1,256,40,40)
+    # Contract width-height into channels, i.e. x(1,64,80,80) to x(1,256,40,40) Contract缩减的意思
     def __init__(self, gain=2):
         super().__init__()
         self.gain = gain
 
     def forward(self, x):
-        b, c, h, w = x.size()  # assert (h / s == 0) and (W / s == 0), 'Indivisible gain'
+        b, c, h, w = x.size()  # assert (h / s == 0) and (W / s == 0), 'Indivisible gain'， w h必须能被gain整除
         s = self.gain
         x = x.view(b, c, h // s, s, w // s, s)  # x(1,64,40,2,40,2)
-        x = x.permute(0, 3, 5, 1, 2, 4).contiguous()  # x(1,2,2,64,40,40)
-        return x.view(b, c * s * s, h // s, w // s)  # x(1,256,40,40)
+        x = x.permute(0, 3, 5, 1, 2, 4).contiguous()  # x(1,2,2,64,40,40) permute维度置换
+        return x.view(b, c * s * s, h // s, w // s)  # x(1,256,40,40) 为啥不能直接x.view？
 
 
 class Expand(nn.Module):
@@ -267,6 +285,7 @@ class Expand(nn.Module):
 
 class Concat(nn.Module):
     # Concatenate a list of tensors along dimension
+    # 为何不直接用torch.cat？
     def __init__(self, dimension=1):
         super().__init__()
         self.d = dimension

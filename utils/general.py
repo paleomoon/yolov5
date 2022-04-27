@@ -643,7 +643,8 @@ def clip_coords(boxes, shape):
 def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=None, agnostic=False, multi_label=False,
                         labels=(), max_det=300):
     """Runs Non-Maximum Suppression (NMS) on inference results
-
+    Params:
+         prediction: [batch, num_anchors(3个yolo预测层), (x+y+w+h+1+num_classes)] = [1, 18900, 85]  3个anchor的预测结果总和
     Returns:
          list of detections, on (n,6) tensor per image [xyxy, conf, cls]
     """

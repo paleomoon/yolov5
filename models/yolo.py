@@ -141,7 +141,7 @@ class Model(nn.Module):
 
     def _forward_once(self, x, profile=False, visualize=False):
         y, dt = [], []  # outputs
-        for m in self.model:
+        for m in self.model: # 逐层forward
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
@@ -222,7 +222,7 @@ class Model(nn.Module):
                 m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
                 delattr(m, 'bn')  # remove batchnorm
                 m.forward = m.forward_fuse  # update forward
-        self.info()
+        self.info() # print params and flops, must forward once
         return self
 
     def info(self, verbose=False, img_size=640):  # print model information
@@ -248,14 +248,14 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
 
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
-        m = eval(m) if isinstance(m, str) else m  # eval strings, how to eval("Conv")?
+        m = eval(m) if isinstance(m, str) else m  # eval() 函数用来执行一个字符串表达式，通常用来去掉引号得到字符对应的表示。from models.common import * 引入了Conv类，所以eval("Conv")得到Conv类
         for j, a in enumerate(args):
             try:
                 args[j] = eval(a) if isinstance(a, str) else a  # eval strings
             except NameError:
                 pass
 
-        n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain,round(x[, n])四舍五入
+        n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain, number数量乘以depth_multiple。round(x[, n])四舍五入
         if m in [Conv, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, MixConv2d, Focus, CrossConv,
                  BottleneckCSP, C3, C3TR, C3SPP, C3Ghost]:
             c1, c2 = ch[f], args[0]
@@ -264,7 +264,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
 
             args = [c1, c2, *args[1:]]
             if m in [BottleneckCSP, C3, C3TR, C3Ghost]:
-                args.insert(2, n)  # number of repeats
+                args.insert(2, n)  # number of repeats, insert(index, obj) insert obj before index
                 n = 1
         elif m is nn.BatchNorm2d: # 通道不变
             args = [ch[f]]
@@ -281,16 +281,16 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         else:
             c2 = ch[f]
 
-        m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
+        m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module，根据深度构建nn.Sequential模型
         t = str(m)[8:-2].replace('__main__.', '')  # module type
-        np = sum(x.numel() for x in m_.parameters())  # number params
+        np = sum(x.numel() for x in m_.parameters())  # number params，numel(): tensor中有多少个元素，如fused Conv2d(3,32,(6,6)), 参数量3*32*6*6+32*2=3520，没有bias，其中32*2为BN层参数
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
         LOGGER.info(f'{i:>3}{str(f):>18}{n_:>3}{np:10.0f}  {t:<40}{str(args):<30}')  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist，save?TODO
         layers.append(m_)
         if i == 0:
             ch = []
-        ch.append(c2)
+        ch.append(c2)#输出通道数添加到ch最后面
     return nn.Sequential(*layers), sorted(save)
 
 
