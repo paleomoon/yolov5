@@ -51,9 +51,9 @@ class Conv(nn.Module):
 
 
 class DWConv(Conv):
-    # Depth-wise convolution class
+    # Depth-wise convolution class，Depth-wise不是深度可分离卷积，Depth-wise+point-wise才是separable conv
     def __init__(self, c1, c2, k=1, s=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
-        super().__init__(c1, c2, k, s, g=math.gcd(c1, c2), act=act)
+        super().__init__(c1, c2, k, s, g=math.gcd(c1, c2), act=act) # groups必须为输入通道和输出通道的最大公约数，groups指分成几组，而不是一组有多少个
 
 
 class TransformerLayer(nn.Module):
