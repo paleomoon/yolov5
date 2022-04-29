@@ -459,23 +459,23 @@ class AutoShape(nn.Module):
     # YOLOv5 input-robust model wrapper for passing cv2/np/PIL/torch inputs. Includes preprocessing, inference and NMS
     conf = 0.25  # NMS confidence threshold
     iou = 0.45  # NMS IoU threshold
-    agnostic = False  # NMS class-agnostic
+    agnostic = False  # NMS class-agnostic，类别不可知，不区分类别，只做一次nms
     multi_label = False  # NMS multiple labels per box
     classes = None  # (optional list) filter by class, i.e. = [0, 15, 16] for COCO persons, cats and dogs
     max_det = 1000  # maximum number of detections per image
-    amp = False  # Automatic Mixed Precision (AMP) inference
+    amp = False  # Automatic Mixed Precision (AMP) inference，自动混合精度？TODO
 
     def __init__(self, model):
         super().__init__()
         LOGGER.info('Adding AutoShape... ')
-        copy_attr(self, model, include=('yaml', 'nc', 'hyp', 'names', 'stride', 'abc'), exclude=())  # copy attributes
+        copy_attr(self, model, include=('yaml', 'nc', 'hyp', 'names', 'stride', 'abc'), exclude=())  # copy attributes from model to self
         self.dmb = isinstance(model, DetectMultiBackend)  # DetectMultiBackend() instance
         self.pt = not self.dmb or model.pt  # PyTorch model
         self.model = model.eval()
 
     def _apply(self, fn):
         # Apply to(), cpu(), cuda(), half() to model tensors that are not parameters or registered buffers
-        self = super()._apply(fn)
+        self = super()._apply(fn) #TODO
         if self.pt:
             m = self.model.model.model[-1] if self.dmb else self.model.model[-1]  # Detect()
             m.stride = fn(m.stride)
@@ -484,23 +484,23 @@ class AutoShape(nn.Module):
                 m.anchor_grid = list(map(fn, m.anchor_grid))
         return self
 
-    @torch.no_grad()
+    @torch.no_grad() # TODO
     def forward(self, imgs, size=640, augment=False, profile=False):
         # Inference from various sources. For height=640, width=1280, RGB images example inputs are:
         #   file:       imgs = 'data/images/zidane.jpg'  # str or PosixPath
         #   URI:             = 'https://ultralytics.com/images/zidane.jpg'
-        #   OpenCV:          = cv2.imread('image.jpg')[:,:,::-1]  # HWC BGR to RGB x(640,1280,3)
+        #   OpenCV:          = cv2.imread('image.jpg')[:,:,::-1]  # HWC BGR to RGB x(640,1280,3), cv2.imread返回shape(h,w,c)的np.array,[:,:,::-1]反转c通道。
         #   PIL:             = Image.open('image.jpg') or ImageGrab.grab()  # HWC x(640,1280,3)
         #   numpy:           = np.zeros((640,1280,3))  # HWC
         #   torch:           = torch.zeros(16,3,320,640)  # BCHW (scaled to size=640, 0-1 values)
         #   multiple:        = [Image.open('image1.jpg'), Image.open('image2.jpg'), ...]  # list of images
 
-        t = [time_sync()]
-        p = next(self.model.parameters()) if self.pt else torch.zeros(1)  # for device and type
+        t = [time_sync()] # 时间同步
+        p = next(self.model.parameters()) if self.pt else torch.zeros(1)  # for device and type，TODO
         autocast = self.amp and (p.device.type != 'cpu')  # Automatic Mixed Precision (AMP) inference
         if isinstance(imgs, torch.Tensor):  # torch
             with amp.autocast(enabled=autocast):
-                return self.model(imgs.to(p.device).type_as(p), augment, profile)  # inference
+                return self.model(imgs.to(p.device).type_as(p), augment, profile)  # inference，自动混合精度推理？
 
         # Pre-process
         n, imgs = (len(imgs), imgs) if isinstance(imgs, list) else (1, [imgs])  # number of images, list of images
@@ -509,13 +509,13 @@ class AutoShape(nn.Module):
             f = f'image{i}'  # filename
             if isinstance(im, (str, Path)):  # filename or uri
                 im, f = Image.open(requests.get(im, stream=True).raw if str(im).startswith('http') else im), im
-                im = np.asarray(exif_transpose(im))
+                im = np.asarray(exif_transpose(im)) # 根据exif信息旋转图像的预处理非常重要
             elif isinstance(im, Image.Image):  # PIL Image
                 im, f = np.asarray(exif_transpose(im)), getattr(im, 'filename', f) or f
             files.append(Path(f).with_suffix('.jpg').name)
             if im.shape[0] < 5:  # image in CHW
                 im = im.transpose((1, 2, 0))  # reverse dataloader .transpose(2, 0, 1)
-            im = im[..., :3] if im.ndim == 3 else np.tile(im[..., None], 3)  # enforce 3ch input
+            im = im[..., :3] if im.ndim == 3 else np.tile(im[..., None], 3)  # enforce 3ch input，[..., None]表示增加一个维度，np.tile(A,n)重复A n次
             s = im.shape[:2]  # HWC
             shape0.append(s)  # image shape
             g = (size / max(s))  # gain
@@ -645,10 +645,10 @@ class Detections:
 
 
 class Classify(nn.Module):
-    # Classification head, i.e. x(b,c1,20,20) to x(b,c2)
+    # Classification head, i.e. x(b,c1,20,20) to x(b,c2)，简单的分类头，比如x(b,c1,20,20)特征生成c2个类别
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1):  # ch_in, ch_out, kernel, stride, padding, groups
         super().__init__()
-        self.aap = nn.AdaptiveAvgPool2d(1)  # to x(b,c1,1,1)
+        self.aap = nn.AdaptiveAvgPool2d(1)  # to x(b,c1,1,1)， 自适应平均池化，对于任何输入大小，输出指定的大小。通道数保持不变。
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g)  # to x(b,c2,1,1)
         self.flat = nn.Flatten()
 

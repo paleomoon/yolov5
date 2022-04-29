@@ -105,7 +105,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         im = im.half() if half else im.float()  # uint8 to fp16/32
         im /= 255  # 0 - 255 to 0.0 - 1.0
         if len(im.shape) == 3:
-            im = im[None]  # expand for batch dim
+            im = im[None]  # expand for batch dim，这种方式很简单
         t2 = time_sync()
         dt[0] += t2 - t1
 

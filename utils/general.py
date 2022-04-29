@@ -644,13 +644,18 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
                         labels=(), max_det=300):
     """Runs Non-Maximum Suppression (NMS) on inference results
     Params:
-         prediction: [batch, num_anchors(3个yolo预测层), (x+y+w+h+1+num_classes)] = [1, 18900, 85]  3个anchor的预测结果总和
+         prediction: [batch, num_anchors(3个yolo预测层), (x+y+w+h+conf+num_classes)] = [1, 18900, 85]  3个anchor的预测结果总和
+         conf_thres: 先进行一轮筛选, 将分数过低的预测框删除, 这里的阈值是指obj_conf * cls_conf TODO
+         iou_thres: iou阈值
+         classes: 是否nms后只保留特定的类别 默认为None
+         agnostic: 进行nms是否也去除不同类别之间的重合度高的框 默认False
+         multi_label: 是否是多标签
     Returns:
          list of detections, on (n,6) tensor per image [xyxy, conf, cls]
     """
 
     nc = prediction.shape[2] - 5  # number of classes
-    xc = prediction[..., 4] > conf_thres  # candidates,prediction[..., 4] TODO shape [1,18900]
+    xc = prediction[..., 4] > conf_thres  # candidates,prediction[..., 4] 最后一维的第四个元素，shape [1,18900],(640x480) stride=32 (20*15+40*30+80*60)*3=18900
 
     # Checks
     assert 0 <= conf_thres <= 1, f'Invalid Confidence threshold {conf_thres}, valid values are between 0.0 and 1.0'
@@ -661,17 +666,17 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     max_nms = 30000  # maximum number of boxes into torchvision.ops.nms()
     time_limit = 10.0  # seconds to quit after
     redundant = True  # require redundant detections, TODO
-    multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
-    merge = False  # use merge-NMS,TODO
+    multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)，作用？TODO
+    merge = False  # use merge-NMS,多个bounding box给它们一个权重进行融合，达到多少才融合？TODO
 
     t = time.time()
     output = [torch.zeros((0, 6), device=prediction.device)] * prediction.shape[0]
     for xi, x in enumerate(prediction):  # image index, image inference
         # Apply constraints
-        # x[((x[..., 2:4] < min_wh) | (x[..., 2:4] > max_wh)).any(1), 4] = 0  # width-height
-        x = x[xc[xi]]  # confidence，筛选出confidence大于阈值的bbox,shape [n,85]
+        # x[((x[..., 2:4] < min_wh) | (x[..., 2:4] > max_wh)).any(1), 4] = 0  # width-height，滤除太小或太大的框
+        x = x[xc[xi]]  # confidence，筛选出confidence大于conf_thres的bbox,shape [n,85]
 
-        # Cat apriori labels if autolabelling
+        # Cat apriori labels if autolabelling，自动标注的先验标签？TODO
         if labels and len(labels[xi]):
             l = labels[xi]
             v = torch.zeros((len(l), nc + 5), device=x.device)
