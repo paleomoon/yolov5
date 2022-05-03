@@ -153,7 +153,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
                         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
                         with open(txt_path + '.txt', 'a') as f:
-                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
+                            f.write(('%g ' * len(line)).rstrip() % line + '\n') # %g在保证六位有效数字的前提下，使用小数方式，否则使用科学计数法
 
                     if save_img or save_crop or view_img:  # Add bbox to image
                         c = int(cls)  # integer class

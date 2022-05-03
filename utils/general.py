@@ -645,11 +645,12 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     """Runs Non-Maximum Suppression (NMS) on inference results
     Params:
          prediction: [batch, num_anchors(3个yolo预测层), (x+y+w+h+conf+num_classes)] = [1, 18900, 85]  3个anchor的预测结果总和
-         conf_thres: 先进行一轮筛选, 将分数过低的预测框删除, 这里的阈值是指obj_conf * cls_conf TODO
+         conf_thres: 将obj_conf分数过低的预测框删除
          iou_thres: iou阈值
          classes: 是否nms后只保留特定的类别 默认为None
          agnostic: 进行nms是否也去除不同类别之间的重合度高的框 默认False
          multi_label: 是否是多标签
+         labels: 自动标注的生成的标签，(cls, *xywh, conf)的标准形式
     Returns:
          list of detections, on (n,6) tensor per image [xyxy, conf, cls]
     """
@@ -666,23 +667,23 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
     max_nms = 30000  # maximum number of boxes into torchvision.ops.nms()
     time_limit = 10.0  # seconds to quit after
     redundant = True  # require redundant detections, TODO
-    multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)，作用？TODO
-    merge = False  # use merge-NMS,多个bounding box给它们一个权重进行融合，达到多少才融合？TODO
+    multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)，一个box多个标签
+    merge = False  # use merge-NMS,多个bounding box结合score进行融合
 
     t = time.time()
     output = [torch.zeros((0, 6), device=prediction.device)] * prediction.shape[0]
     for xi, x in enumerate(prediction):  # image index, image inference
         # Apply constraints
         # x[((x[..., 2:4] < min_wh) | (x[..., 2:4] > max_wh)).any(1), 4] = 0  # width-height，滤除太小或太大的框
-        x = x[xc[xi]]  # confidence，筛选出confidence大于conf_thres的bbox,shape [n,85]
+        x = x[xc[xi]]  # confidence，第一轮筛选，筛选出obj_conf大于conf_thres的bbox,shape [n,85]
 
-        # Cat apriori labels if autolabelling，自动标注的先验标签？TODO
+        # Cat apriori labels if autolabelling，自动标注的先验标签
         if labels and len(labels[xi]):
-            l = labels[xi]
+            l = labels[xi] # [n, (cls, *xywh, conf)],一张图的标签列表（可能有n个目标）
             v = torch.zeros((len(l), nc + 5), device=x.device)
             v[:, :4] = l[:, 1:5]  # box
-            v[:, 4] = 1.0  # conf
-            v[range(len(l)), l[:, 0].long() + 5] = 1.0  # cls
+            v[:, 4] = 1.0  # conf 置1？ TODO
+            v[range(len(l)), l[:, 0].long() + 5] = 1.0  # cls 置1？+5？ TODO
             x = torch.cat((x, v), 0)
 
         # If none remain process next image
@@ -690,22 +691,22 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
             continue
 
         # Compute conf
-        x[:, 5:] *= x[:, 4:5]  # conf = obj_conf * cls_conf
+        x[:, 5:] *= x[:, 4:5]  # conf = obj_conf * cls_conf，这里要注意，将cls_conf赋值为了两个分数的乘积，用于筛选出分数最大的类别（如果单单cls_conf高而obj_conf低显然不可）
 
         # Box (center x, center y, width, height) to (x1, y1, x2, y2)
         box = xywh2xyxy(x[:, :4])
 
         # Detections matrix nx6 (xyxy, conf, cls)
         if multi_label:
-            i, j = (x[:, 5:] > conf_thres).nonzero(as_tuple=False).T
+            i, j = (x[:, 5:] > conf_thres).nonzero(as_tuple=False).T # nonzero获得非0(True)元素的下标,转置，获得索引列表和真假值
             x = torch.cat((box[i], x[i, j + 5, None], j[:, None].float()), 1)
         else:  # best class only
-            conf, j = x[:, 5:].max(1, keepdim=True)
-            x = torch.cat((box, conf, j.float()), 1)[conf.view(-1) > conf_thres]
+            conf, j = x[:, 5:].max(1, keepdim=True) # 第二轮筛选，选出最大的类别分数和索引，这里的类别分数已经是obj_conf * cls_conf，shape [58,1] [58,1]
+            x = torch.cat((box, conf, j.float()), 1)[conf.view(-1) > conf_thres] # 直接在Tensor后加一个[]进行过滤，注意这种用法
 
         # Filter by class
         if classes is not None:
-            x = x[(x[:, 5:6] == torch.tensor(classes, device=x.device)).any(1)]
+            x = x[(x[:, 5:6] == torch.tensor(classes, device=x.device)).any(1)] #维度1上存在满足classes索引列表的元素，any存在元素为True，则返回True
 
         # Apply finite constraint
         # if not torch.isfinite(x).all():
@@ -719,20 +720,20 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
             x = x[x[:, 4].argsort(descending=True)[:max_nms]]  # sort by confidence
 
         # Batched NMS
-        c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
-        boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
-        i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
+        c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes，agnostic为False即要保留不同类别重合度高的框。类别分数乘以一个很大的数作为偏移c，坐标加上c，这样不同类别的重合度较高的框就能分开，避免被nms删除，这是一个trick
+        boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores，https://github.com/ultralytics/yolov5/issues/422
+        i = torchvision.ops.nms(boxes, scores, iou_thres)  # 使用torchvision的NMS，这里的scores是obj_conf,返回保留的元素的索引列表（降序）
         if i.shape[0] > max_det:  # limit detections
             i = i[:max_det]
         if merge and (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
             # update boxes as boxes(i,4) = weights(i,n) * boxes(n,4)
-            iou = box_iou(boxes[i], boxes) > iou_thres  # iou matrix
-            weights = iou * scores[None]  # box weights
-            x[i, :4] = torch.mm(weights, x[:, :4]).float() / weights.sum(1, keepdim=True)  # merged boxes
+            iou = box_iou(boxes[i], boxes) > iou_thres  # iou matrix，shape [5,49]，其中每个元素是nms后的boxes[i]与所有boxes的iou值
+            weights = iou * scores[None]  # box weights，iou matrix每行元素与scores(1,49)对应元素相乘，（其实就是广播），效果是上述iou matrix的加权
+            x[i, :4] = torch.mm(weights, x[:, :4]).float() / weights.sum(1, keepdim=True)  # merged boxes，torch.mm矩阵乘法，把权重乘以框再除以权重之和
             if redundant:
                 i = i[iou.sum(1) > 1]  # require redundancy
 
-        output[xi] = x[i]
+        output[xi] = x[i] # 最终序号xi的图片的输出
         if (time.time() - t) > time_limit:
             print(f'WARNING: NMS time limit {time_limit}s exceeded')
             break  # time limit exceeded
