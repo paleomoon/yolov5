@@ -99,7 +99,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
     # Run inference
     model.warmup(imgsz=(1, 3, *imgsz), half=half)  # warmup，bchw
     dt, seen = [0.0, 0.0, 0.0], 0
-    for path, im, im0s, vid_cap, s in dataset:
+    for path, im, im0s, vid_cap, s in dataset: # 图片/视频路径,resize+pad后的图片。元素图片，视频源，打印信息
         t1 = time_sync()
         im = torch.from_numpy(im).to(device)
         im = im.half() if half else im.float()  # uint8 to fp16/32
@@ -135,7 +135,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
             save_path = str(save_dir / p.name)  # im.jpg
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # im.txt
             s += '%gx%g ' % im.shape[2:]  # print string
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh,im0.shape:(720,1280,3),tensor[[1, 0, 1, 0]]?TODO gn [1280,720,1280,720]
             imc = im0.copy() if save_crop else im0  # for save_crop
             annotator = Annotator(im0, line_width=line_thickness, example=str(names))
             if len(det):

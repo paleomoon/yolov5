@@ -13,7 +13,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sn
+import seaborn as sn # 基于matplotlib的图形可视化python包 能够做出各种有吸引力的统计图表
 import torch
 from PIL import Image, ImageDraw, ImageFont
 
@@ -23,7 +23,7 @@ from utils.metrics import fitness
 
 # Settings
 CONFIG_DIR = user_config_dir()  # Ultralytics settings dir
-RANK = int(os.getenv('RANK', -1))
+RANK = int(os.getenv('RANK', -1)) # 获取'RANK'环境变量
 matplotlib.rc('font', **{'size': 11})
 matplotlib.use('Agg')  # for writing to files only
 
