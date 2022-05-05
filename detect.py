@@ -116,7 +116,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         dt[1] += t3 - t2
 
         # NMS
-        pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
+        pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det) # shape [n, num_obj, 6]
         dt[2] += time_sync() - t3
 
         # Second-stage classifier (optional)
@@ -143,14 +143,14 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
                 det[:, :4] = scale_coords(im.shape[2:], det[:, :4], im0.shape).round()
 
                 # Print results
-                for c in det[:, -1].unique():
-                    n = (det[:, -1] == c).sum()  # detections per class
+                for c in det[:, -1].unique(): # unique去除重复元素并从小到大排序，det[:, -1]表示按cls_idx排序，c为类别索引
+                    n = (det[:, -1] == c).sum()  # detections per class，该类别有多少个框
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
                 # Write results
-                for *xyxy, conf, cls in reversed(det):
+                for *xyxy, conf, cls in reversed(det): # xyxy上面已经缩放到原图了
                     if save_txt:  # Write to file
-                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh，xyxy除以原图进行归一化
                         line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
                         with open(txt_path + '.txt', 'a') as f:
                             f.write(('%g ' * len(line)).rstrip() % line + '\n') # %g在保证六位有效数字的前提下，使用小数方式，否则使用科学计数法
@@ -197,7 +197,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
     if update:
-        strip_optimizer(weights)  # update model (to fix SourceChangeWarning)
+        strip_optimizer(weights)  # update model (to fix SourceChangeWarning)，strip_optimizer函数将optimizer从ckpt中删除  更新模型
 
 
 def parse_opt():

@@ -613,15 +613,15 @@ def resample_segments(segments, n=1000):
 
 
 def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None):
-    # Rescale coords (xyxy) from img1_shape to img0_shape
+    # Rescale coords (xyxy) from img1_shape to img0_shape, shape (h,w), ratio_pad 缩放比例和pad [(gain,gain),pad]
     if ratio_pad is None:  # calculate from img0_shape
         gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])  # gain  = old / new
-        pad = (img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2  # wh padding
+        pad = (img1_shape[1] - img0_shape[1] * gain) / 2, (img1_shape[0] - img0_shape[0] * gain) / 2  # wh padding，其中有一个为0
     else:
         gain = ratio_pad[0][0]
         pad = ratio_pad[1]
 
-    coords[:, [0, 2]] -= pad[0]  # x padding
+    coords[:, [0, 2]] -= pad[0]  # x padding，因为coords是img1上的，img1上有pad，所以减去pad就对应原图img0坐标，再除以缩放比例得到原图坐标
     coords[:, [1, 3]] -= pad[1]  # y padding
     coords[:, :4] /= gain
     clip_coords(coords, img0_shape)
@@ -631,7 +631,7 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None):
 def clip_coords(boxes, shape):
     # Clip bounding xyxy bounding boxes to image shape (height, width)
     if isinstance(boxes, torch.Tensor):  # faster individually
-        boxes[:, 0].clamp_(0, shape[1])  # x1
+        boxes[:, 0].clamp_(0, shape[1])  # x1, clamp_(min, max): 将取整限定在(min, max)之间
         boxes[:, 1].clamp_(0, shape[0])  # y1
         boxes[:, 2].clamp_(0, shape[1])  # x2
         boxes[:, 3].clamp_(0, shape[0])  # y2
@@ -644,7 +644,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
                         labels=(), max_det=300):
     """Runs Non-Maximum Suppression (NMS) on inference results
     Params:
-         prediction: [batch, num_anchors(3个yolo预测层), (x+y+w+h+conf+num_classes)] = [1, 18900, 85]  3个anchor的预测结果总和
+         prediction: [batch, num_anchors(3个yolo预测层), (x+y+w+h+conf+num_classes)] = [1, 18900, 85]  3个anchor的预测结果总和。这里的box坐标是模型输出的已经对应输入图像的坐标
          conf_thres: 将obj_conf分数过低的预测框删除
          iou_thres: iou阈值
          classes: 是否nms后只保留特定的类别 默认为None
@@ -652,7 +652,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
          multi_label: 是否是多标签
          labels: 自动标注的生成的标签，(cls, *xywh, conf)的标准形式
     Returns:
-         list of detections, on (n,6) tensor per image [xyxy, conf, cls]
+         list of detections, on (n,6) tensor per image [xyxy, conf, cls_idx], conf=obj_conf * cls_conf
     """
 
     nc = prediction.shape[2] - 5  # number of classes
@@ -701,7 +701,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
             i, j = (x[:, 5:] > conf_thres).nonzero(as_tuple=False).T # nonzero获得非0(True)元素的下标,转置，获得索引列表和真假值
             x = torch.cat((box[i], x[i, j + 5, None], j[:, None].float()), 1)
         else:  # best class only
-            conf, j = x[:, 5:].max(1, keepdim=True) # 第二轮筛选，选出最大的类别分数和索引，这里的类别分数已经是obj_conf * cls_conf，shape [58,1] [58,1]
+            conf, j = x[:, 5:].max(1, keepdim=True) # 第二轮筛选，选出最大的类别分数和类别索引，这里的类别分数已经是obj_conf * cls_conf，shape [58,1] [58,1]
             x = torch.cat((box, conf, j.float()), 1)[conf.view(-1) > conf_thres] # 直接在Tensor后加一个[]进行过滤，注意这种用法
 
         # Filter by class

@@ -37,7 +37,7 @@ class Colors:
         self.palette = [self.hex2rgb('#' + c) for c in hex]
         self.n = len(self.palette)
 
-    def __call__(self, i, bgr=False):
+    def __call__(self, i, bgr=False): # __call__可通过“对象名()”的形式使用
         c = self.palette[int(i) % self.n]
         return (c[2], c[1], c[0]) if bgr else c
 
