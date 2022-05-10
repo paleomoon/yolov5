@@ -93,7 +93,17 @@ def exif_transpose(image):
 
 def create_dataloader(path, imgsz, batch_size, stride, single_cls=False, hyp=None, augment=False, cache=False, pad=0.0,
                       rect=False, rank=-1, workers=8, image_weights=False, quad=False, prefix='', shuffle=False):
-    if rect and shuffle:
+    """
+    自定义dataloader函数, 调用LoadImagesAndLabels获取数据集(包括数据增强) + 调用分布式采样器DistributedSampler + 自定义InfiniteDataLoader 进行永久持续的采样数据
+    cache: 训练之前将数据读取到内存RAM, 加快训练速度。 如何做的? TODO
+    pad: 设置rect训练时pad的像素值
+    rect: TODO
+    rank: 多卡训练时的进程编号, -1且gpu=1时不进行分布式, -1且多块gpu使用DataParallel模式
+    image_weights: TODO
+    quad: dataloader取数据时, 是否使用collate_fn4代替collate_fn  默认False TODO
+    prefix: 显示信息   一个标志，多为train/val，处理标签时保存cache文件会用到 TODO
+    """
+    if rect and shuffle: # TODO
         LOGGER.warning('WARNING: --rect is incompatible with DataLoader shuffle, setting shuffle=False')
         shuffle = False
     with torch_distributed_zero_first(rank):  # init dataset *.cache only once if DDP
@@ -370,7 +380,7 @@ class LoadStreams:
 def img2label_paths(img_paths):
     # Define label paths as a function of image paths
     sa, sb = os.sep + 'images' + os.sep, os.sep + 'labels' + os.sep  # /images/, /labels/ substrings
-    return [sb.join(x.rsplit(sa, 1)).rsplit('.', 1)[0] + '.txt' for x in img_paths]
+    return [sb.join(x.rsplit(sa, 1)).rsplit('.', 1)[0] + '.txt' for x in img_paths] # string.rsplit(separator, max) 若指定 max，返回列表将包含max+1个元素。
 
 
 class LoadImagesAndLabels(Dataset):
@@ -380,11 +390,11 @@ class LoadImagesAndLabels(Dataset):
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
                  cache_images=False, single_cls=False, stride=32, pad=0.0, prefix=''):
         self.img_size = img_size
-        self.augment = augment
+        self.augment = augment # 是否进行数据增强，一般训练时打开，验证时关闭
         self.hyp = hyp
-        self.image_weights = image_weights
+        self.image_weights = image_weights # 是否按类别比例进行加权（比例高的权重小）TODO
         self.rect = False if image_weights else rect
-        self.mosaic = self.augment and not self.rect  # load 4 images at a time into a mosaic (only during training)
+        self.mosaic = self.augment and not self.rect  # load 4 images at a time into a mosaic (only during training)，为什么rect就不能进行mosaic增强？TODO
         self.mosaic_border = [-img_size // 2, -img_size // 2]
         self.stride = stride
         self.path = path
@@ -405,6 +415,7 @@ class LoadImagesAndLabels(Dataset):
                         # f += [p.parent / x.lstrip(os.sep) for x in t]  # local to global path (pathlib)
                 else:
                     raise Exception(f'{prefix}{p} does not exist')
+            # 整个数据集图片的相对路径，排序后
             self.img_files = sorted(x.replace('/', os.sep) for x in f if x.split('.')[-1].lower() in IMG_FORMATS)
             # self.img_files = sorted([x for x in f if x.suffix[1:].lower() in IMG_FORMATS])  # pathlib
             assert self.img_files, f'{prefix}No images found'
@@ -412,7 +423,7 @@ class LoadImagesAndLabels(Dataset):
             raise Exception(f'{prefix}Error loading data from {path}: {e}\nSee {HELP_URL}')
 
         # Check cache
-        self.label_files = img2label_paths(self.img_files)  # labels
+        self.label_files = img2label_paths(self.img_files)  # labels，将image绝对路径后缀替换为txt
         cache_path = (p if p.is_file() else Path(self.label_files[0]).parent).with_suffix('.cache')
         try:
             cache, exists = np.load(cache_path, allow_pickle=True).item(), True  # load dict

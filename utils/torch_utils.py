@@ -9,7 +9,7 @@ import os
 import platform
 import subprocess
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager # 用于进行上下文管理的模块
 from copy import deepcopy
 from pathlib import Path
 
@@ -26,14 +26,16 @@ except ImportError:
     thop = None
 
 
-@contextmanager
+@contextmanager # 上下文管理器
 def torch_distributed_zero_first(local_rank: int):
     """
-    Decorator to make all processes in distributed training wait for each local_master to do something.
+    Decorator to make all processes in distributed training wait for each local_master to do something. 
+    基于torch.distributed.barrier()函数的上下文管理器，为了完成分布式训练时数据的同步操作
+    local_rank: 代表当前进程号  0代表主进程  1、2、3代表子进程
     """
     if local_rank not in [-1, 0]:
-        dist.barrier(device_ids=[local_rank])
-    yield
+        dist.barrier(device_ids=[local_rank]) # 如果不是猪进程，则让此进程处于等待状态，等待所有进程到达栅栏处（包括主进程数据处理完毕）
+    yield # 中断后执行上下文代码，然后返回到此处继续往下执行
     if local_rank == 0:
         dist.barrier(device_ids=[0])
 
