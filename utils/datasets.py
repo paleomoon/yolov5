@@ -11,7 +11,7 @@ import random
 import shutil
 import time
 from itertools import repeat
-from multiprocessing.pool import Pool, ThreadPool
+from multiprocessing.pool import Pool, ThreadPool # 多进程模块 线程池
 from pathlib import Path
 from threading import Thread
 from zipfile import ZipFile
@@ -54,7 +54,7 @@ def exif_size(img):
     # Returns exif-corrected PIL size
     s = img.size  # (width, height)
     try:
-        rotation = dict(img._getexif().items())[orientation]
+        rotation = dict(img._getexif().items())[orientation] # 如果有exif信息，则读取，当旋转角度为90度或270度，则交换宽高
         if rotation == 6:  # rotation 270
             s = (s[1], s[0])
         elif rotation == 8:  # rotation 90
@@ -426,7 +426,7 @@ class LoadImagesAndLabels(Dataset):
         self.label_files = img2label_paths(self.img_files)  # labels，将image绝对路径后缀替换为txt
         cache_path = (p if p.is_file() else Path(self.label_files[0]).parent).with_suffix('.cache')
         try:
-            cache, exists = np.load(cache_path, allow_pickle=True).item(), True  # load dict
+            cache, exists = np.load(cache_path, allow_pickle=True).item(), True  # load dict, allow_pickle 必须设置为True才能返回dtype=object（包括dict）的numpy array，否则只能范围dtype数字类型
             assert cache['version'] == self.cache_version  # same version
             assert cache['hash'] == get_hash(self.label_files + self.img_files)  # same hash
         except:
@@ -520,6 +520,7 @@ class LoadImagesAndLabels(Dataset):
         x = {}  # dict
         nm, nf, ne, nc, msgs = 0, 0, 0, 0, []  # number missing, found, empty, corrupt, messages
         desc = f"{prefix}Scanning '{path.parent / path.stem}' images and labels..."
+        # 多进程数据并行，通过imap处理大块可迭代对象并立即返回函数结果组成的迭代器，verify_image_label函数每次处理可迭代对象的一个元素
         with Pool(NUM_THREADS) as pool:
             pbar = tqdm(pool.imap(verify_image_label, zip(self.img_files, self.label_files, repeat(prefix))),
                         desc=desc, total=len(self.img_files))
@@ -895,6 +896,7 @@ def autosplit(path='../datasets/coco128/images', weights=(0.9, 0.1, 0.0), annota
 
 def verify_image_label(args):
     # Verify one image-label pair
+    # 检查jpg图像是否损坏、标签是否每行5个数、每个数是否大于0、是否归一化或越界
     im_file, lb_file, prefix = args
     nm, nf, ne, nc, msg, segments = 0, 0, 0, 0, '', []  # number (missing, found, empty, corrupt), message, segments
     try:
@@ -906,8 +908,8 @@ def verify_image_label(args):
         assert im.format.lower() in IMG_FORMATS, f'invalid image format {im.format}'
         if im.format.lower() in ('jpg', 'jpeg'):
             with open(im_file, 'rb') as f:
-                f.seek(-2, 2)
-                if f.read() != b'\xff\xd9':  # corrupt JPEG
+                f.seek(-2, 2) # 移动光标到指定位置，2表示文件尾，-2表示向文件头方向移动2字节
+                if f.read() != b'\xff\xd9':  # corrupt JPEG，read([size])没有size参数，读取到文件尾，所以这里是读取图片最后两个字节
                     ImageOps.exif_transpose(Image.open(im_file)).save(im_file, 'JPEG', subsampling=0, quality=100)
                     msg = f'{prefix}WARNING: {im_file}: corrupt JPEG restored and saved'
 
@@ -921,12 +923,12 @@ def verify_image_label(args):
                     segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in l]  # (cls, xy1...)
                     l = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
                 l = np.array(l, dtype=np.float32)
-            nl = len(l)
+            nl = len(l) # 目标框标签数量
             if nl:
                 assert l.shape[1] == 5, f'labels require 5 columns, {l.shape[1]} columns detected'
                 assert (l >= 0).all(), f'negative label values {l[l < 0]}'
                 assert (l[:, 1:] <= 1).all(), f'non-normalized or out of bounds coordinates {l[:, 1:][l[:, 1:] > 1]}'
-                _, i = np.unique(l, axis=0, return_index=True)
+                _, i = np.unique(l, axis=0, return_index=True) # 去重并从大到小排序，return_index返回新元素在旧列表中的索引（i）
                 if len(i) < nl:  # duplicate row check
                     l = l[i]  # remove duplicates
                     if segments:
@@ -937,7 +939,7 @@ def verify_image_label(args):
                 l = np.zeros((0, 5), dtype=np.float32)
         else:
             nm = 1  # label missing
-            l = np.zeros((0, 5), dtype=np.float32)
+            l = np.zeros((0, 5), dtype=np.float32) #shape(0,5)无意义，只是占位
         return im_file, l, shape, segments, nm, nf, ne, nc, msg
     except Exception as e:
         nc = 1
