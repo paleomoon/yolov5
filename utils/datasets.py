@@ -97,7 +97,7 @@ def create_dataloader(path, imgsz, batch_size, stride, single_cls=False, hyp=Non
     自定义dataloader函数, 调用LoadImagesAndLabels获取数据集(包括数据增强) + 调用分布式采样器DistributedSampler + 自定义InfiniteDataLoader 进行永久持续的采样数据
     cache: 训练之前将数据读取到内存RAM, 加快训练速度。 如何做的? TODO
     pad: 设置rect训练时shape pad的值
-    rect: TODO
+    rect: rectangle trainning, 表示尽量以接近
     rank: 多卡训练时的进程编号, -1且gpu=1时不进行分布式, -1且多块gpu使用DataParallel模式
     image_weights: TODO
     quad: dataloader取数据时, 是否使用collate_fn4代替collate_fn  默认False TODO
@@ -469,7 +469,9 @@ class LoadImagesAndLabels(Dataset):
                 if segment:
                     self.segments[i][:, 0] = 0
 
-        # Rectangular Training
+        # Rectangular Training，目的是减少缩放后冗余的pad，加快训练，https://github.com/ultralytics/yolov3/issues/232
+        # 一个batch内的图片shape要相近，否则小图片会吃亏
+        # 将aspect ratio排序，这样aspect ratio相近的图放一个batch，减少填充
         if self.rect:
             # Sort by aspect ratio
             s = self.shapes  # wh
@@ -482,7 +484,6 @@ class LoadImagesAndLabels(Dataset):
             ar = ar[irect] #排序后的aspect ratio
 
             # Set training image shapes，这里img_size是我们设置的，self.batch_shapes是训练/推理时的大小（保持原图不变形）
-            # 一个batch内的所有图像必须缩放到差不多的尺度（不一定完全一致？TODO），这里选择最接近正方形的尺度，因此这个参数称为rect
             shapes = [[1, 1]] * nb
             for i in range(nb):# i batch index
                 ari = ar[bi == i] #一个batch中的所有图片的高宽比

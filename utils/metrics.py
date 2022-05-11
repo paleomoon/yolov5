@@ -132,7 +132,7 @@ class ConfusionMatrix:
         Returns:
             None, updates confusion matrix accordingly
         """
-        detections = detections[detections[:, 4] > self.conf]
+        detections = detections[detections[:, 4] > self.conf] # conf阈值过滤
         gt_classes = labels[:, 0].int()
         detection_classes = detections[:, 5].int()
         iou = box_iou(labels[:, 1:], detections[:, :4])
