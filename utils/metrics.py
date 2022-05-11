@@ -117,7 +117,7 @@ def compute_ap(recall, precision):
 class ConfusionMatrix:
     # Updated version of https://github.com/kaanakan/object_detection_confusion_matrix
     def __init__(self, nc, conf=0.25, iou_thres=0.45):
-        self.matrix = np.zeros((nc + 1, nc + 1))
+        self.matrix = np.zeros((nc + 1, nc + 1)) # 初始化混淆矩阵，横坐标gt（从左到右），纵坐标pred（从上到下），最后一个类为背景类
         self.nc = nc  # number of classes
         self.conf = conf
         self.iou_thres = iou_thres

@@ -96,7 +96,7 @@ def create_dataloader(path, imgsz, batch_size, stride, single_cls=False, hyp=Non
     """
     自定义dataloader函数, 调用LoadImagesAndLabels获取数据集(包括数据增强) + 调用分布式采样器DistributedSampler + 自定义InfiniteDataLoader 进行永久持续的采样数据
     cache: 训练之前将数据读取到内存RAM, 加快训练速度。 如何做的? TODO
-    pad: 设置rect训练时pad的像素值
+    pad: 设置rect训练时shape pad的值
     rect: TODO
     rank: 多卡训练时的进程编号, -1且gpu=1时不进行分布式, -1且多块gpu使用DataParallel模式
     image_weights: TODO
@@ -430,10 +430,10 @@ class LoadImagesAndLabels(Dataset):
             assert cache['version'] == self.cache_version  # same version
             assert cache['hash'] == get_hash(self.label_files + self.img_files)  # same hash
         except:
-            cache, exists = self.cache_labels(cache_path, prefix), False  # cache
+            cache, exists = self.cache_labels(cache_path, prefix), False  # cache，以字典形式缓存每张图片的labels信息，包括标注信息、shape、哈希值等
 
         # Display cache
-        nf, nm, ne, nc, n = cache.pop('results')  # found, missing, empty, corrupted, total
+        nf, nm, ne, nc, n = cache.pop('results')  # found, missing, empty, corrupted, total，dict.pop删除字典的键值
         if exists:
             d = f"Scanning '{cache_path}' images and labels... {nf} found, {nm} missing, {ne} empty, {nc} corrupted"
             tqdm(None, desc=prefix + d, total=n, initial=n)  # display cache results
@@ -443,13 +443,13 @@ class LoadImagesAndLabels(Dataset):
 
         # Read cache
         [cache.pop(k) for k in ('hash', 'version', 'msgs')]  # remove items
-        labels, shapes, self.segments = zip(*cache.values())
+        labels, shapes, self.segments = zip(*cache.values()) #values返回值（视图对象）
         self.labels = list(labels)
         self.shapes = np.array(shapes, dtype=np.float64)
         self.img_files = list(cache.keys())  # update
-        self.label_files = img2label_paths(cache.keys())  # update
+        self.label_files = img2label_paths(cache.keys())  # update，根据keys（图像路径）更新labels文件路径，因为检查后可能某些图像或标签不合格
         n = len(shapes)  # number of images
-        bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
+        bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index，每张图片的batch索引，如batch-size=2, bi=[0,0,1,1,...] numpy.arange([start, ]stop, [step, ])返回ndarray 
         nb = bi[-1] + 1  # number of batches
         self.batch = bi  # batch index of image
         self.n = n
@@ -473,27 +473,29 @@ class LoadImagesAndLabels(Dataset):
         if self.rect:
             # Sort by aspect ratio
             s = self.shapes  # wh
-            ar = s[:, 1] / s[:, 0]  # aspect ratio
-            irect = ar.argsort()
-            self.img_files = [self.img_files[i] for i in irect]
-            self.label_files = [self.label_files[i] for i in irect]
-            self.labels = [self.labels[i] for i in irect]
+            ar = s[:, 1] / s[:, 0]  # aspect ratio,h/w
+            irect = ar.argsort() # 将高宽比按从小到大排序，返回排序序号
+            self.img_files = [self.img_files[i] for i in irect] # 将图片按高宽比排序
+            self.label_files = [self.label_files[i] for i in irect] # 将标签文件按高宽比排序
+            self.labels = [self.labels[i] for i in irect] #将标签按高宽比排序
             self.shapes = s[irect]  # wh
-            ar = ar[irect]
+            ar = ar[irect] #排序后的aspect ratio
 
-            # Set training image shapes
+            # Set training image shapes，这里img_size是我们设置的，self.batch_shapes是训练/推理时的大小（保持原图不变形）
+            # 一个batch内的所有图像必须缩放到差不多的尺度（不一定完全一致？TODO），这里选择最接近正方形的尺度，因此这个参数称为rect
             shapes = [[1, 1]] * nb
-            for i in range(nb):
-                ari = ar[bi == i]
+            for i in range(nb):# i batch index
+                ari = ar[bi == i] #一个batch中的所有图片的高宽比
                 mini, maxi = ari.min(), ari.max()
-                if maxi < 1:
-                    shapes[i] = [maxi, 1]
-                elif mini > 1:
-                    shapes[i] = [1, 1 / mini]
-
+                if maxi < 1: # 最大的小于1，那么所有高宽比都小于1，此时按最大的比例
+                    shapes[i] = [maxi, 1] # 将w设为img_size。上面的self.shapes是wh，这里的shapes是hw
+                elif mini > 1: # 所有高宽比都大于1，按最小的比例
+                    shapes[i] = [1, 1 / mini] # 将h设为img_size
+                #如果有的高宽比小于1，有的高宽比大于1，shapes取默认的[1,1]
+            #计算每个batch输入网络的shape，32的倍数向上取整
             self.batch_shapes = np.ceil(np.array(shapes) * img_size / stride + pad).astype(np.int) * stride
 
-        # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)
+        # Cache images into memory for faster training (WARNING: large datasets may exceed system RAM)，一般只cache labels，不cache images
         self.imgs, self.img_npy = [None] * n, [None] * n
         if cache_images:
             if cache_images == 'disk':
@@ -522,7 +524,7 @@ class LoadImagesAndLabels(Dataset):
         desc = f"{prefix}Scanning '{path.parent / path.stem}' images and labels..."
         # 多进程数据并行，通过imap处理大块可迭代对象并立即返回函数结果组成的迭代器，verify_image_label函数每次处理可迭代对象的一个元素
         with Pool(NUM_THREADS) as pool:
-            pbar = tqdm(pool.imap(verify_image_label, zip(self.img_files, self.label_files, repeat(prefix))),
+            pbar = tqdm(pool.imap(verify_image_label, zip(self.img_files, self.label_files, repeat(prefix))), # windows下报错：页面文件太小无法完成操作
                         desc=desc, total=len(self.img_files))
             for im_file, l, shape, segments, nm_f, nf_f, ne_f, nc_f, msg in pbar:
                 nm += nm_f
@@ -895,8 +897,9 @@ def autosplit(path='../datasets/coco128/images', weights=(0.9, 0.1, 0.0), annota
 
 
 def verify_image_label(args):
-    # Verify one image-label pair
-    # 检查jpg图像是否损坏、标签是否每行5个数、每个数是否大于0、是否归一化或越界
+    # Verify one image-label pair，每次处理一张图像
+    # 检查图像格式、大小、是否损坏
+    # 检查标签是否每行5个数、每个数是否大于0、是否归一化或越界
     im_file, lb_file, prefix = args
     nm, nf, ne, nc, msg, segments = 0, 0, 0, 0, '', []  # number (missing, found, empty, corrupt), message, segments
     try:
@@ -908,7 +911,7 @@ def verify_image_label(args):
         assert im.format.lower() in IMG_FORMATS, f'invalid image format {im.format}'
         if im.format.lower() in ('jpg', 'jpeg'):
             with open(im_file, 'rb') as f:
-                f.seek(-2, 2) # 移动光标到指定位置，2表示文件尾，-2表示向文件头方向移动2字节
+                f.seek(-2, 2) # 移动指针到指定位置，2表示文件尾，-2表示向文件头方向移动2字节
                 if f.read() != b'\xff\xd9':  # corrupt JPEG，read([size])没有size参数，读取到文件尾，所以这里是读取图片最后两个字节
                     ImageOps.exif_transpose(Image.open(im_file)).save(im_file, 'JPEG', subsampling=0, quality=100)
                     msg = f'{prefix}WARNING: {im_file}: corrupt JPEG restored and saved'
