@@ -153,7 +153,7 @@ def run(data,
         model.warmup(imgsz=(1, 3, imgsz, imgsz), half=half)  # warmup
         pad = 0.0 if task == 'speed' else 0.5
         task = task if task in ('train', 'val', 'test') else 'val'  # path to train/val/test images
-        dataloader = create_dataloader(data[task], imgsz, batch_size, stride, single_cls, pad=pad, rect=pt, # rect=pt? TODO
+        dataloader = create_dataloader(data[task], imgsz, batch_size, stride, single_cls, pad=pad, rect=pt, # rect=pt 如果是pt模型，则使用rectangular inference
                                        workers=workers, prefix=colorstr(f'{task}: '))[0]
 
     seen = 0
@@ -165,7 +165,7 @@ def run(data,
     loss = torch.zeros(3, device=device) # 
     jdict, stats, ap, ap_class = [], [], [], []
     pbar = tqdm(dataloader, desc=s, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
-    for batch_i, (im, targets, paths, shapes) in enumerate(pbar):
+    for batch_i, (im, targets, paths, shapes) in enumerate(pbar): # targets:标注label[图片在batch内的索引,cls,x,y,w,h]
         t1 = time_sync()
         if pt or jit or engine:
             im = im.to(device, non_blocking=True)
@@ -177,6 +177,8 @@ def run(data,
         dt[0] += t2 - t1
 
         # Inference
+        # out: 3个检测头融合成一个 [bs, anchor_num*grid_w*grid_h, xywh+conf+classes]
+        # train_out 3个检测头输出结果 [bs, anchor_num, grid_w, grid_h, xywh+conf+classes]
         out, train_out = model(im) if training else model(im, augment=augment, val=True)  # inference, loss outputs
         dt[1] += time_sync() - t2
 
@@ -185,19 +187,20 @@ def run(data,
             loss += compute_loss([x.float() for x in train_out], targets)[1]  # box, obj, cls
 
         # NMS
-        targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels
+        targets[:, 2:] *= torch.Tensor([width, height, width, height]).to(device)  # to pixels,还原gt到输入图像
         lb = [targets[targets[:, 0] == i, 1:] for i in range(nb)] if save_hybrid else []  # for autolabelling
         t3 = time_sync()
+        # out: list[bs],每张图n个预测框：[n,xyxy+conf+cls_idx]
         out = non_max_suppression(out, conf_thres, iou_thres, labels=lb, multi_label=True, agnostic=single_cls)
         dt[2] += time_sync() - t3
 
         # Metrics
-        for si, pred in enumerate(out):
-            labels = targets[targets[:, 0] == si, 1:]
-            nl = len(labels)
-            tcls = labels[:, 0].tolist() if nl else []  # target class
-            path, shape = Path(paths[si]), shapes[si][0]
-            seen += 1
+        for si, pred in enumerate(out): # si： batch中图片索引
+            labels = targets[targets[:, 0] == si, 1:] #获取第si张图片的标签信息[cls,x,y,w,h]]
+            nl = len(labels) # gt个数
+            tcls = labels[:, 0].tolist() if nl else []  # target class，类别索引
+            path, shape = Path(paths[si]), shapes[si][0] # 图片路径 shape
+            seen += 1 # 统计图片数量+1
 
             if len(pred) == 0:
                 if nl:
@@ -208,7 +211,7 @@ def run(data,
             if single_cls:
                 pred[:, 5] = 0
             predn = pred.clone()
-            scale_coords(im[si].shape[1:], predn[:, :4], shape, shapes[si][1])  # native-space pred
+            scale_coords(im[si].shape[1:], predn[:, :4], shape, shapes[si][1])  # native-space pred，将预测坐标从标准输入映射到原图
 
             # Evaluate
             if nl:

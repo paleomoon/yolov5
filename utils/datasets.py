@@ -629,7 +629,7 @@ class LoadImagesAndLabels(Dataset):
 
         labels_out = torch.zeros((nl, 6))
         if nl:
-            labels_out[:, 1:] = torch.from_numpy(labels)
+            labels_out[:, 1:] = torch.from_numpy(labels) # labels_out第一个数暂时为0，后面调用collate_fn会赋一个batch内的索引
 
         # Convert
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
@@ -639,13 +639,20 @@ class LoadImagesAndLabels(Dataset):
 
     @staticmethod
     def collate_fn(batch):
+        """
+        这个函数会在create_dataloader中生成dataloader时调用,调用了batch_size次getitem函数后调用一次这个函数，对batch_size张图片和对应的label进行打包
+        """
         img, label, path, shapes = zip(*batch)  # transposed
         for i, l in enumerate(label):
             l[:, 0] = i  # add target image index for build_targets()
-        return torch.stack(img, 0), torch.cat(label, 0), path, shapes
+        return torch.stack(img, 0), torch.cat(label, 0), path, shapes # 每张图的label数量可能不相同，只能使用cat
 
     @staticmethod
     def collate_fn4(batch):
+        """
+        当train.py的opt参数quad=True 则调用collate_fn4代替collate_fn
+        0.5的概率将4张图片(mosaic)拼接到一张大图上(相当于mosaic上再mosaic?)，0.5的概率直接上采样2倍
+        """
         img, label, path, shapes = zip(*batch)  # transposed
         n = len(shapes) // 4
         img4, label4, path4, shapes4 = [], [], path[:n], shapes[:n]

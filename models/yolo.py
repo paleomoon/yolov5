@@ -286,7 +286,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         np = sum(x.numel() for x in m_.parameters())  # number params，numel(): tensor中有多少个元素，如fused Conv2d(3,32,(6,6)), 参数量3*32*6*6+32*2=3520，没有bias，其中32*2为BN层参数
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
         LOGGER.info(f'{i:>3}{str(f):>18}{n_:>3}{np:10.0f}  {t:<40}{str(args):<30}')  # print
-        save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist，save?TODO
+        save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist，把所有层结构中from不是-1的值记下
         layers.append(m_)
         if i == 0:
             ch = []
