@@ -254,6 +254,25 @@ class GhostBottleneck(nn.Module):
     def forward(self, x):
         return self.conv(x) + self.shortcut(x)
 
+class SELayer(nn.Module):
+    # SE注意力机制模块
+    # https://arxiv.org/abs/1709.01507
+    def __init__(self, c1, r=18):
+        super().__init__()
+        self.avgpool = nn.AdaptiveAvgPool2d(1) # output 1
+        self.fc1 = nn.Linear(c1, c1//r, bias=True) # nn.Linear(in_features, out_features, bias=True)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(c1//r, c1, bias=True)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avgpool(x).view(b, c) # nn.Linear对最后一个维度变维，前面的维度保持不变，所以要先view(b, c)
+        y = self.fc1(y)
+        y = self.relu(y)
+        y = self.fc2(y)
+        y = self.sigmoid(y).view(b, c, 1, 1)
+        return x * y.expand_as(x) # 复制拓展y：[b,c,1,1] => [b,c,h,w]
 
 class Contract(nn.Module):
     # Contract width-height into channels, i.e. x(1,64,80,80) to x(1,256,40,40) Contract缩减的意思
