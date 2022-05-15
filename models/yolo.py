@@ -257,7 +257,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
 
         n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain, number数量乘以depth_multiple。round(x[, n])四舍五入
         if m in [Conv, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, MixConv2d, Focus, CrossConv,
-                 BottleneckCSP, C3, C3TR, C3SPP, C3Ghost]:
+                 BottleneckCSP, C3, C3TR, C3SPP, C3Ghost, CBAM, CA]:
             c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, 8) # 只有最后一层不需要通道是8的倍数
@@ -281,7 +281,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         elif m is SELayer:
             channel, r = args[0], args[1]
             channel = make_divisible(channel * gw, 8) if channel != no else channel
-            args = [channel, r] 
+            args = [channel, r]
         else:
             c2 = ch[f]
 

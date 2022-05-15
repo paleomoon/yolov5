@@ -6,6 +6,9 @@ Common modules
 import json
 import math
 import platform
+from statistics import mean
+from tkinter.tix import Tree
+from turtle import forward
 import warnings
 from collections import OrderedDict, namedtuple
 from copy import copy # 数据拷贝模块 分浅拷贝和深拷贝
@@ -260,9 +263,10 @@ class SELayer(nn.Module):
     def __init__(self, c1, r=18):
         super().__init__()
         self.avgpool = nn.AdaptiveAvgPool2d(1) # output 1
-        self.fc1 = nn.Linear(c1, c1//r, bias=True) # nn.Linear(in_features, out_features, bias=True)
+        # attention中bias一般都设为False，因为不需要，why?
+        self.fc1 = nn.Linear(c1, c1//r, bias=False) # nn.Linear(in_features, out_features, bias=True)
         self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(c1//r, c1, bias=True)
+        self.fc2 = nn.Linear(c1//r, c1, bias=False)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
@@ -274,6 +278,88 @@ class SELayer(nn.Module):
         y = self.sigmoid(y).view(b, c, 1, 1)
         return x * y.expand_as(x) # 复制拓展y：[b,c,1,1] => [b,c,h,w]
 
+class CAM(nn.Module):
+    # channel attention module, 这个类输出的是通道权重，还没有乘以输入
+    def __init__(self, c1, r=16): # in_channel,ratio
+        super().__init__()
+        self.maxpool = nn.AdaptiveMaxPool2d(1)
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
+        # shaared MLP
+        self.fc1 = nn.Conv2d(c1, c1//r, 1, bias=False) 
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Conv2d(c1//2, c1, 1, bias=False)
+
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x): #[b,c,h,w]
+        y_max = self.fc2(self.relu(self.fc1(self.maxpool(x)))) # [b,c,1,1] -> [b,c//r,1,1] -> [b,c,1,1]
+        y_avg = self.fc2(self.relu(self.fc1(self.avgpool(x)))) # [b,c,1,1] -> [b,c//r,1,1] -> [b,c,1,1]
+        y = y_max + y_avg #[b,c,1,1]
+        return self.sigmoid(y)
+
+class SAM(nn.Module):
+    # spatial attention module
+    def __init__(self, kernel_size=7):
+        super().__init__()
+        assert kernel_size in (3,7), "kernel size must be 3 or 7"
+        self.conv = nn.Conv2d(2, 1, kernel_size=kernel_size, padding=autopad(kernel_size), bias=False) # bias不需要
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x): # 输入[b,c,h,w]
+        y_avg = torch.mean(x, dim=1, keepdim=True) # [b,1,h,w]
+        y_max, _ = torch.max(x, dim=1, keepdim=True) # [b,1,h,w], torch.max returns (values, indices)
+        y = torch.concat([y_avg, y_max], dim=1) # [b,2,h,w]
+        return self.sigmoid(self.conv(y)) # [b,1,h,w]
+
+class CBAM(nn.Module):
+    def __init__(self, c1, c2): # c2输出通道=c1, 这里没用到c2，只是为了在yolo.py中方便载入参数
+        super().__init__()
+        self.cam = CAM(c1)
+        self.sam = SAM()
+    def forward(self, x):
+        # 通过广播机制相乘
+        y = x * self.cam(x) # 这里并没有像SELayer的view作为nn.linear输入，所以不需要像SELayer的变换维度
+        y = y * self.sam(y)
+        return y
+
+class CA(nn.Module):
+    """
+    CA Coordinate attention 协同注意力机制
+    论文 CVPR2021: https://arxiv.org/abs/2103.02907
+    源码: https://github.com/Andrew-Qibin/CoordAttention/blob/main/coordatt.py
+    CA是一种spatial attention, 相比于SAM的7x7卷积，CA建立了远程依赖
+    """
+    def __init__(self, c1, c2, r): # input channel, 等于output channel, reduction
+        super().__init__()
+        self.pool_w = nn.AdaptiveAvgPool2d((None,1)) # output_size (H,W), w方向做pooling
+        self.pool_h = nn.AdaptiveAvgPool2d((1, None))
+
+        # 对中间层channel做一个限制，使不小于8
+        c = min(8, c1 // r)
+
+        self.conv = nn.Conv2d(c1, c, 1)
+        self.bn = nn.BatchNorm2d(c) # nn.BatchNorm2d也是需要参数的
+        self.act = nn.Hardswish() # 可以实验其他激活函数，论文里是这个
+
+        self.conv_w = nn.Conv2d(c, c2, 1)
+        self.conv_h = nn.Conv2d(c, c2, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x): # [b,c,h,w]
+        b, c, h, w = x.size()
+        y_w = self.pool_w(x) # [b,c,h,w] -> [b,c,h,1]
+        y_h = self.pool_h(x).permute(0,1,3,2) # [b,c,h,w] -> [b,c,1,w] -> [b,c,w,1]
+        
+        y = torch.concat([y_h, y_w], dim=2) # [b,c,h+w,1]
+        y = self.act(self.bn(self.conv(y))) # [b,c//r,h+w,1]
+
+        y_h, y_w = torch.split(y, [h,w], dim=2) # y_h [b,c//r,h,1] y_w [b,c//r,w,1]
+        y_w= y_w.permutte(0,1,3,2) # [b,c//r,1,w]
+
+        y_h = self.sigmoid(self.conv_w(y_h)) # [b,c,h,1]
+        y_w = self.sigmoid(self.conv_w(y_w)) # [b,c,w,1]
+        return x * y_h * y_w # [b,c,h,w]
+        
 class Contract(nn.Module):
     # Contract width-height into channels, i.e. x(1,64,80,80) to x(1,256,40,40) Contract缩减的意思
     def __init__(self, gain=2):
