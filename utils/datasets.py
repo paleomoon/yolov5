@@ -103,7 +103,7 @@ def create_dataloader(path, imgsz, batch_size, stride, single_cls=False, hyp=Non
     quad: dataloader取数据时, 是否使用collate_fn4代替collate_fn  默认False TODO
     prefix: 显示信息   一个标志，多为train/val，处理标签时保存cache文件会用到 TODO
     """
-    if rect and shuffle: # TODO
+    if rect and shuffle: # 因为rect参数需要对数据高宽比进行排序后将相近的放一个batch（见LoadImagesAndLabels类），所以不能在使用shuffle打乱了
         LOGGER.warning('WARNING: --rect is incompatible with DataLoader shuffle, setting shuffle=False')
         shuffle = False
     with torch_distributed_zero_first(rank):  # init dataset *.cache only once if DDP

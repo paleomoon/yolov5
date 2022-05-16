@@ -439,6 +439,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
 
 def parse_opt(known=False):
+    # nargs='?' 如果可能的话，会从命令行中消耗一个参数，并产生一个单一项。如果当前没有命令行参数，则会产生 default 值（对于选项（--形式）会产生const值）
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default=ROOT / 'yolov5s.pt', help='initial weights path')
     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
@@ -568,10 +569,13 @@ def main(opt, callbacks=Callbacks()):
         if opt.bucket:
             os.system(f'gsutil cp gs://{opt.bucket}/evolve.csv {save_dir}')  # download evolve.csv if exists
 
+        # 超参数演化
+        # 通过fitness判断当前一代的好坏
+        # parent决定如何选择上一代，single表示选前面的代中最好的那个，weighted代表选择得分的前 5个加权平均的结果作为下一代
         for _ in range(opt.evolve):  # generations to evolve
             if evolve_csv.exists():  # if evolve.csv exists: select best hyps and mutate
                 # Select parent(s)
-                parent = 'single'  # parent selection method: 'single' or 'weighted'
+                parent = 'single'  # parent selection method: 'single' or 'weighted'，
                 x = np.loadtxt(evolve_csv, ndmin=2, delimiter=',', skiprows=1)
                 n = min(5, len(x))  # number of previous results to consider
                 x = x[np.argsort(-fitness(x))][:n]  # top n mutations
