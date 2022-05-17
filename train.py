@@ -168,8 +168,9 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     # Scheduler
     if opt.linear_lr:
         lf = lambda x: (1 - x / (epochs - 1)) * (1.0 - hyp['lrf']) + hyp['lrf']  # linear
-    else:
-        lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']
+    else: 
+        # 默认学习率consine decay,lr先增加, 再减少, 再以更小的斜率减少
+        lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']，学习率从1->0.01
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)  # plot_lr_scheduler(optimizer, scheduler, epochs)
 
     # EMA
