@@ -1,0 +1,1 @@
+python train.py --img 512 --batch 64 --epochs 300 --data ./data/wrjk.yaml --cfg ./models/yolov5s_wrjk.yaml --weights yolov5s.pt --hyp data/hyps/hyp.wrjk.yaml

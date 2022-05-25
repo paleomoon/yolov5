@@ -1,0 +1,1 @@
+python export.py --weights runs/train/exp15/weights/best.pt --include onnx --imgsz 512 512 --simplify

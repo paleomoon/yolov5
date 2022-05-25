@@ -1,0 +1,1 @@
+python detect.py --source ./data/images --device=cpu --weights runs/train/exp12/weights/last.pt --imgsz 512 512

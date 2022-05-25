@@ -1,0 +1,1 @@
+python val.py --weights runs/train/exp12/weights/last.pt --imgsz 512 --data wrjk.yaml
