@@ -720,7 +720,7 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
             x = x[x[:, 4].argsort(descending=True)[:max_nms]]  # sort by confidence
 
         # Batched NMS
-        c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes，agnostic为False即要保留不同类别重合度高的框。类别分数乘以一个很大的数作为偏移c，坐标加上c，这样不同类别的重合度较高的框就能分开，避免被nms删除，这是一个trick
+        c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes，agnostic为False即要保留不同类别重合度高的框。类别索引乘以一个很大的数作为偏移c，坐标加上c，这样不同类别的重合度较高的框就能分开，避免被nms删除。同时这里只是用于nms，并不会改变结果。这是一个trick
         boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores，https://github.com/ultralytics/yolov5/issues/422
         i = torchvision.ops.nms(boxes, scores, iou_thres)  # 使用torchvision的NMS，这里的scores是obj_conf,返回保留的元素的索引列表（降序）
         if i.shape[0] > max_det:  # limit detections
