@@ -12,7 +12,7 @@ from utils.torch_utils import is_parallel
 
 def smooth_BCE(eps=0.1):  # https://github.com/ultralytics/yolov3/issues/238#issuecomment-598028441
     # return positive, negative label smoothing BCE targets
-    return 1.0 - 0.5 * eps, 0.5 * eps
+    return 1.0 - 0.5 * eps, 0.5 * eps # 标签平滑，原先的正样本=1 负样本=0 改为 正样本=1.0 - 0.5 * eps  负样本=0.5 * eps
 
 
 class BCEBlurWithLogitsLoss(nn.Module):
@@ -91,41 +91,80 @@ class QFocalLoss(nn.Module):
 class ComputeLoss:
     # Compute losses
     def __init__(self, model, autobalance=False):
-        self.sort_obj_iou = False
+        self.sort_obj_iou = False # 后面筛选置信度损失正样本的时候是否先对iou排序
         device = next(model.parameters()).device  # get model device
         h = model.hyp  # hyperparameters
 
-        # Define criteria
+        # Define criteria，定义分类损失和置信度损失
         BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['cls_pw']], device=device))
         BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['obj_pw']], device=device))
 
         # Class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
-        self.cp, self.cn = smooth_BCE(eps=h.get('label_smoothing', 0.0))  # positive, negative BCE targets
+        self.cp, self.cn = smooth_BCE(eps=h.get('label_smoothing', 0.0))  # positive, negative BCE targets，如果eps=0代表不做标签平滑
 
         # Focal loss
         g = h['fl_gamma']  # focal loss gamma
         if g > 0:
             BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
 
+        # det: 返回的是模型的检测头 Detector 3个 分别对应产生三个输出feature map
         det = model.module.model[-1] if is_parallel(model) else model.model[-1]  # Detect() module
+
+        # balance用来设置三个feature map对应输出的置信度损失系数(平衡三个feature map的置信度损失)
+        # 从左到右分别对应大feature map(检测小目标)到小feature map(检测大目标)
+        # 思路:  It seems that larger output layers may overfit earlier, so those numbers may need a bit of adjustment
+        #       一般来说，检测小物体的难度大一点，所以会增加大特征图的损失系数，让模型更加侧重小物体的检测
+        # 如果det.nl=3就返回[4.0, 1.0, 0.4]否则返回[4.0, 1.0, 0.25, 0.06, .02]
+        # self.balance = {3: [4.0, 1.0, 0.4], 4: [4.0, 1.0, 0.25, 0.06], 5: [4.0, 1.0, 0.25, 0.06, .02]}[det.nl]
         self.balance = {3: [4.0, 1.0, 0.4]}.get(det.nl, [4.0, 1.0, 0.25, 0.06, 0.02])  # P3-P7
+
+        # 三个预测头的下采样率det.stride: [8, 16, 32]  .index(16): 求出下采样率stride=16的索引
+        # 这个参数会用来自动计算更新3个feature map的置信度损失系数self.balance
         self.ssi = list(det.stride).index(16) if autobalance else 0  # stride 16 index
+
+        # self.BCEcls: 类别损失函数   self.BCEobj: 置信度损失函数   self.hyp: 超参数
+        # self.gr: 计算真实框的置信度标准的iou ratio    self.autobalance: 是否自动更新各feature map的置信度损失平衡系数  默认False
         self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, 1.0, h, autobalance
+
+        # na: number of anchors  每个grid_cell的anchor数量 = 3
+        # nc: number of classes  数据集的总类别 = 80
+        # nl: number of detection layers   Detect的个数 = 3
+        # anchors: [3, 3, 2]  3个feature map 每个feature map上有3个anchor(w,h) 这里的anchor尺寸是相对feature map的
         for k in 'na', 'nc', 'nl', 'anchors':
             setattr(self, k, getattr(det, k))
 
     def __call__(self, p, targets):  # predictions, targets, model
+        """
+        :params p:  预测框 由模型构建中的三个检测头Detector返回的三个yolo层的输出
+                    tensor格式 list列表 存放三个tensor 对应的是三个yolo层的输出
+                    如: [4, 3, 112, 112, 85]、[4, 3, 56, 56, 85]、[4, 3, 28, 28, 85]
+                    [bs, anchor_num, grid_h, grid_w, xywh+class+classes]
+                    可以看出来这里的预测值p是三个yolo层每个grid_cell(每个grid_cell有三个预测值)的预测值,后面肯定要进行正样本筛选
+        :params targets: 数据增强后的真实框 [63, 6] [num_object,  batch_index+class+xywh]
+        :params loss * bs: 整个batch的总损失  进行反向传播
+        :params torch.cat((lbox, lobj, lcls, loss)).detach(): 回归损失、置信度损失、分类损失和总损失 这个参数只用来可视化参数或保存信息
+        """
         device = targets.device
         lcls, lbox, lobj = torch.zeros(1, device=device), torch.zeros(1, device=device), torch.zeros(1, device=device)
+        # tcls: 表示这个target所属的class index
+        # tbox: xywh 其中xy为这个target对当前grid_cell左上角的偏移量
+        # indices: b: 表示这个target属于的image index
+        #          a: 表示这个target使用的anchor index
+        #          gj: 经过筛选后确定某个target在某个网格中进行预测(计算损失)  gj表示这个网格的左上角y坐标
+        #          gi: 表示这个网格的左上角x坐标
+        # anch: 表示这个target所使用anchor的尺度（相对于这个feature map）  注意可能一个target会使用大小不同anchor进行计算
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
 
         # Losses
+        # 依次遍历三个feature map的预测输出pi
         for i, pi in enumerate(p):  # layer index, layer predictions
             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
-            tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj
+            tobj = torch.zeros_like(pi[..., 0], device=device)  # target obj，初始化target置信度(先全是负样本 后面再筛选正样本赋值)
 
             n = b.shape[0]  # number of targets
             if n:
+                # 精确得到第b张图片的第a个feature map的grid_cell(gi, gj)对应的预测值
+                # 用这个预测值与我们筛选的这个grid_cell的真实框进行预测(计算损失)
                 ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
 
                 # Regression
